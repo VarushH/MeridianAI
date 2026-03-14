@@ -20,6 +20,7 @@ export default function RagQATab() {
   const [query, setQuery] = useState("");
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [retrieverType, setRetrieverType] = useState<"similarity" | "contextual" | "multiquery">("similarity");
 
   const handleAsk = async (q?: string) => {
     const text = (q || query).trim();
@@ -30,7 +31,7 @@ export default function RagQATab() {
     setHistory((prev) => [entry, ...prev]);
 
     try {
-      const res = await askQuestion(text);
+      const res = await askQuestion(text, retrieverType);
       setHistory((prev) => prev.map((h) => (h.ts === entry.ts ? { ...h, answer: res.answer } : h)));
     } catch (err: any) {
       setHistory((prev) => prev.map((h) => (h.ts === entry.ts ? { ...h, error: err.message } : h)));
@@ -40,10 +41,11 @@ export default function RagQATab() {
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 animate-fade-in">
-      {/* Left: Query Input - 2 cols */}
-      <div className="lg:col-span-2 space-y-5">
-        <div className="rounded-lg border border-border bg-card p-6">
+    <div className="flex flex-col gap-6 animate-fade-in">
+      {/* Top Row: Query Input & Example Queries */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* Knowledge Query - 75% width */}
+        <div className="lg:col-span-3 rounded-lg border border-border bg-card p-6 shadow-sm">
           <div className="flex items-center gap-2.5 mb-1">
             <Search className="w-[18px] h-[18px] text-primary" />
             <h2 className="text-base font-semibold font-heading text-card-foreground">Knowledge Query</h2>
@@ -51,6 +53,25 @@ export default function RagQATab() {
           <p className="text-sm text-muted-foreground mb-5">
             Ask questions against your ingested documents. The RAG pipeline retrieves relevant chunks and generates an answer.
           </p>
+
+          <div className="mb-5 space-y-2">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Retrieval Strategy</label>
+            <div className="flex bg-muted/30 p-1 rounded-lg border border-border">
+              {[
+                { id: "similarity", label: "Normal" },
+                { id: "contextual", label: "Contextual Compression" },
+                { id: "multiquery", label: "Multi-Query" }
+              ].map(type => (
+                <button
+                  key={type.id}
+                  onClick={() => setRetrieverType(type.id as any)}
+                  className={`flex-1 text-xs font-medium py-2 rounded-md transition-all ${retrieverType === type.id ? 'bg-background shadow-sm text-foreground font-semibold border border-border/50' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {type.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Your Question</label>
           <textarea
@@ -76,76 +97,81 @@ export default function RagQATab() {
           </div>
         </div>
 
-        {/* Example queries */}
-        <div className="rounded-lg border border-border bg-card p-6">
+        {/* Example queries - Remaining space, vertical order */}
+        <div className="lg:col-span-1 rounded-lg border border-border bg-card p-6 shadow-sm">
           <div className="flex items-center gap-2.5 mb-4">
             <Sparkles className="w-[18px] h-[18px] text-accent" />
-            <h2 className="text-base font-semibold font-heading text-card-foreground">Example Queries</h2>
+            <h2 className="text-base font-semibold font-heading text-card-foreground">Query Assistant</h2>
           </div>
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             {EXAMPLE_QUERIES.map((eq) => (
               <button
                 key={eq}
-                className="w-full flex items-center gap-2 text-left p-3 rounded-md border border-border text-sm text-muted-foreground hover:bg-muted hover:text-card-foreground transition-colors"
+                className="flex items-center gap-2 text-left p-2.5 rounded-md border border-border text-[13px] text-muted-foreground hover:bg-muted hover:text-card-foreground transition-all group"
                 onClick={() => { setQuery(eq); handleAsk(eq); }}
               >
-                <MessageSquare className="w-3.5 h-3.5 shrink-0 opacity-50" />
-                {eq}
+                <MessageSquare className="w-3.5 h-3.5 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity" />
+                <span className="line-clamp-3">{eq}</span>
               </button>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Right: Answer History - 3 cols */}
-      <div className="lg:col-span-3">
-        <div className="rounded-lg border border-border bg-card p-6 flex flex-col" style={{ minHeight: 400 }}>
-          <div className="flex items-center justify-between mb-4">
+      {/* Bottom Row: Answer History */}
+      <div className="w-full">
+        <div className="rounded-lg border border-border bg-card p-6 flex flex-col shadow-sm" style={{ minHeight: 300 }}>
+          <div className="flex items-center justify-between mb-4 pb-4 border-b">
             <div className="flex items-center gap-2.5">
               <Clock className="w-[18px] h-[18px] text-muted-foreground" />
               <h2 className="text-base font-semibold font-heading text-card-foreground">Answers</h2>
-              <span className="text-xs text-muted-foreground">{history.length} queries</span>
+              <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{history.length} queries in this session</span>
             </div>
             {history.length > 0 && (
               <button
-                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-card-foreground transition-colors"
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-destructive transition-colors"
                 onClick={() => setHistory([])}
               >
-                <Trash2 className="w-3.5 h-3.5" /> Clear
+                <Trash2 className="w-3.5 h-3.5" /> Clear History
               </button>
             )}
           </div>
 
-          <div className="flex-1 overflow-y-auto max-h-[calc(100vh-300px)]">
+          <div className="flex-1 overflow-y-auto max-h-[600px] pr-2 custom-scrollbar">
             {history.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full py-16 text-muted-foreground">
-                <Search className="w-10 h-10 mb-3 opacity-30" />
-                <p className="text-sm">No queries yet. Ask a question or pick an example.</p>
+              <div className="flex flex-col items-center justify-center h-full py-20 text-muted-foreground">
+                <Search className="w-12 h-12 mb-4 opacity-10" />
+                <p className="text-sm font-medium">No queries yet</p>
+                <p className="text-xs opacity-60">Your question history will appear here</p>
               </div>
             ) : (
-              <div className="space-y-5">
+              <div className="space-y-6">
                 {history.map((h) => (
-                  <div key={h.ts} className="animate-fade-in">
-                    <div className="flex items-start gap-2.5 mb-2.5">
-                      <div className="w-7 h-7 rounded-md bg-accent/10 text-accent flex items-center justify-center shrink-0 mt-0.5">
-                        <MessageSquare className="w-3.5 h-3.5" />
+                  <div key={h.ts} className="animate-fade-in border-b border-border/50 pb-6 last:border-0 last:pb-0">
+                    <div className="flex items-start gap-3 mb-4">
+                      <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0 mt-0.5">
+                        <MessageSquare className="w-4 h-4" />
                       </div>
-                      <p className="text-sm font-medium text-card-foreground leading-relaxed">{h.query}</p>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-card-foreground leading-relaxed">{h.query}</p>
+                        <p className="text-[10px] text-muted-foreground mt-1 uppercase tracking-tighter">Query Time: {new Date(h.ts).toLocaleTimeString()}</p>
+                      </div>
                     </div>
                     {h.answer ? (
-                      <div className="ml-9 p-3.5 rounded-md bg-muted/50 border border-border">
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-primary mb-2">Answer</p>
+                      <div className="ml-11 p-5 rounded-xl bg-muted/40 border border-border/50 shadow-sm relative group overflow-hidden">
+                        <div className="absolute top-0 left-0 w-1 h-full bg-primary/20 group-hover:bg-primary/50 transition-colors" />
+                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary/70 mb-3 ml-1">Verified Answer</p>
                         <p className="text-sm text-card-foreground leading-relaxed whitespace-pre-wrap">{h.answer}</p>
                       </div>
                     ) : h.error ? (
-                      <div className="ml-9 p-3.5 rounded-md bg-danger/5 border border-danger/20">
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-danger mb-2">Error</p>
-                        <p className="text-sm text-danger">{h.error}</p>
+                      <div className="ml-11 p-4 rounded-lg bg-destructive/5 border border-destructive/20">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-destructive mb-2">Error Encountered</p>
+                        <p className="text-sm text-destructive">{h.error}</p>
                       </div>
                     ) : (
-                      <div className="ml-9 flex items-center gap-2 text-sm text-muted-foreground">
-                        <span className="w-4 h-4 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
-                        Retrieving context & generating answer…
+                      <div className="ml-11 flex items-center gap-3 text-sm text-muted-foreground p-4 bg-muted/20 rounded-lg animate-pulse">
+                        <span className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                        Intelligence agents are synthesising context and generating an answer…
                       </div>
                     )}
                   </div>

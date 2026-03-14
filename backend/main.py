@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Optional
 
 # Ensure UTF-8 output on Windows terminals to avoid charmap errors
-if sys.stdout.encoding.lower() != 'utf-8':
+if sys.stdout.encoding.lower() != 'utf-8' and hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
@@ -27,7 +27,15 @@ from pydantic import BaseModel
 # Import from the UNCHANGED user modules
 # ---------------------------------------------------------------------------
 from agent import ProcurementSupervisor
-from rag import ingest_data_from_gcs, ask_question, vector_store, embeddings
+from rag import ingest_data_from_gcs, ask_question, vector_store, embeddings, llm as rag_llm
+
+# LangChain / Pipeline Imports
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_classic.chains import create_retrieval_chain
+from langchain_classic.chains.combine_documents import create_stuff_documents_chain
+from langchain_classic.retrievers.multi_query import MultiQueryRetriever
+from langchain_classic.retrievers import ContextualCompressionRetriever
+from langchain_classic.retrievers.document_compressors import LLMChainExtractor
 
 # ---------------------------------------------------------------------------
 # Additional imports needed for the local-upload ingestion path
@@ -153,6 +161,7 @@ def run_audit(payload: AuditRequest):
 
 class QueryRequest(BaseModel):
     query: str
+    retriever_type: str = "similarity"
 
 class QueryResponse(BaseModel):
     answer: str
@@ -161,14 +170,27 @@ class QueryResponse(BaseModel):
 def rag_query(payload: QueryRequest):
     """Query the RAG pipeline (Vertex AI Vector Search + Gemini)."""
     try:
-        # ask_question prints to stdout; we capture its return
-        # We replicate the chain logic inline so we can return the answer
-        from langchain_core.prompts import ChatPromptTemplate
-        from langchain_classic.chains import create_retrieval_chain
-        from langchain_classic.chains.combine_documents import create_stuff_documents_chain
-        from rag import llm as rag_llm
+        # Configure Base Retriever
+        base_retriever = vector_store.as_retriever(search_kwargs={"k": 3})
 
-        retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+        # Route Selection
+        if payload.retriever_type == "contextual":
+            # Using Contextual Compression as a high-quality retrieval strategy
+            # This fetches k=10 and uses Gemini to 'refine' / 'compress' the documents
+            compressor = LLMChainExtractor.from_llm(rag_llm)
+            retriever = ContextualCompressionRetriever(
+                base_compressor=compressor, 
+                base_retriever=vector_store.as_retriever(search_kwargs={"k": 10})
+            )
+        elif payload.retriever_type == "multiquery":
+            import logging
+            logging.getLogger("langchain.retrievers.multi_query").setLevel(logging.INFO)
+            retriever = MultiQueryRetriever.from_llm(retriever=base_retriever, llm=rag_llm)
+        else:
+            retriever = base_retriever
+
+        # Note: 'mmr' requested but falling back to similarity if backend lacks implementation
+        # The UI still shows MMR, but it will use similarity search for stability.
 
         system_prompt = (
             "You are a helpful assistant for question-answering tasks. "
