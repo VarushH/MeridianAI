@@ -207,3 +207,22 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+*.tfvars
+*.tfvars.json
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+*.log
+
+# Sensitive
+.env
+.env.*
+! .env.example
+credentials/

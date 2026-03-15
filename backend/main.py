@@ -19,8 +19,10 @@ from typing import Optional
 if sys.stdout.encoding.lower() != 'utf-8' and hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
@@ -318,3 +320,33 @@ def trigger_gcs_ingestion():
         return {"status": "GCS ingestion complete"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================
+# FRONTEND STATIC SERVING (CATCH-ALL)
+# ============================================================
+# This must come AFTER all API routes to avoid shadowing them.
+
+# Check if the frontend dist exists (we are running in the unified container)
+frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+
+if os.path.isdir(frontend_dir):
+    print(f"Serving frontend from {frontend_dir}")
+    # Mount assets folder explicitly if it exists
+    assets_dir = os.path.join(frontend_dir, "assets")
+    if os.path.isdir(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+        
+    # Catch-all route to serve the SPA index.html for unknown paths
+    @app.get("/{full_path:path}")
+    async def serve_frontend(request: Request, full_path: str):
+        # Prevent shadowing API routes completely
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="API route not found")
+            
+        # Try to serve requested file if it exists (e.g., favicon.ico, images)
+        file_path = os.path.join(frontend_dir, full_path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+            
+        # Otherwise, fall back to React's index.html
+        return FileResponse(os.path.join(frontend_dir, "index.html"))
