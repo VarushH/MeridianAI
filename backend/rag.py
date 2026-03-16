@@ -17,9 +17,9 @@ from langchain_core.prompts import ChatPromptTemplate
 # ==========================================
 # 1. Configuration & Initialization
 # ==========================================
-PROJECT_ID = "meridian-ai-platform"
-REGION = "us-central1"
-GCS_BUCKET_NAME = "meridian-ai-platform-vector-staging"
+PROJECT_ID = os.getenv("GCP_PROJECT", "meridian-ai-platform")
+REGION = os.getenv("GCP_REGION", "us-central1")
+GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "meridian-ai-platform-vector-staging")
 GCS_PREFIX = "uploads/"
 
 # Initialize Vertex AI SDK

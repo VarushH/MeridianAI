@@ -47,3 +47,5 @@ jobs:
             --timeout=3600
             --memory=2048Mi
             --cpu=1
+            --service-account=meridianai-runtime@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
+            --set-env-vars=GCP_PROJECT=${{ env.PROJECT_ID }},GCP_REGION=${{ env.REGION }}
