@@ -9,11 +9,6 @@ variable "region" {
   default     = "us-central1"
 }
 
-variable "github_repository" {
-  description = "The exact GitHub repository name (e.g. your-org/MeridianAI)"
-  type        = string
-}
-
 variable "repository_id" {
   description = "The name for the Artifact Registry Docker repository"
   type        = string
