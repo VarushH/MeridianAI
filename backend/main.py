@@ -327,7 +327,10 @@ def trigger_gcs_ingestion():
 # This must come AFTER all API routes to avoid shadowing them.
 
 # Check if the frontend dist exists (we are running in the unified container)
+# Try standard sibling path first, then container subfolder path
 frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+if not os.path.isdir(frontend_dir):
+    frontend_dir = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 
 if os.path.isdir(frontend_dir):
     print(f"Serving frontend from {frontend_dir}")
