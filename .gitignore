@@ -16,8 +16,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Avoid broad matches that ignore frontend/src/lib
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -226,3 +227,7 @@ frontend/dist/
 .env.*
 ! .env.example
 credentials/
+
+# Force inclusion of frontend source files that might be caught by broad rules
+!frontend/src/lib/
+!frontend/src/lib/**
