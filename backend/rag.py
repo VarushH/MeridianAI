@@ -2,11 +2,7 @@ import os
 import tempfile
 
 from google.cloud import aiplatform, storage
-from langchain_google_vertexai import (
-    VertexAIEmbeddings,
-    ChatVertexAI,
-    VectorSearchVectorStore,
-)
+from langchain_google_vertexai import VectorSearchVectorStore
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -14,22 +10,25 @@ from langchain_classic.chains import create_retrieval_chain
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
 
+from config.settings import settings
+from llm import get_llm
+from embeddings import get_embeddings
 # ==========================================
 # 1. Configuration & Initialization
 # ==========================================
-PROJECT_ID = os.getenv("GCP_PROJECT", "meridian-ai-platform")
-REGION = os.getenv("GCP_REGION", "us-central1")
-GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "meridian-ai-platform-vector-staging")
-GCS_PREFIX = "uploads/"
+PROJECT_ID = settings.GCP_PROJECT
+REGION = settings.GCP_REGION
+GCS_BUCKET_NAME = settings.GCS_BUCKET_NAME
+GCS_PREFIX = settings.GCS_PREFIX
 
 # Initialize Vertex AI SDK
 aiplatform.init(project=PROJECT_ID, location=REGION)
 
 # Initialize the embedding model (Vertex AI Enterprise versions)
-embeddings = VertexAIEmbeddings(model_name="text-embedding-004")
+embeddings = get_embeddings()
 
-# Initialize the LLM (Gemini 1.5 Pro)
-llm = ChatVertexAI(model_name="gemini-2.5-pro")
+# Initialize the LLM
+llm = get_llm()
 
 # ==========================================
 # 2. Vector Database Setup
@@ -38,8 +37,8 @@ vector_store = VectorSearchVectorStore.from_components(
     project_id=PROJECT_ID,
     region=REGION,
     embedding=embeddings,  # NOTE: singular "embedding", not "embeddings"
-    index_id="projects/745639784437/locations/us-central1/indexes/340754046610571264",
-    endpoint_id="projects/745639784437/locations/us-central1/indexEndpoints/289965405500342272",
+    index_id=settings.vector_search_index_id,
+    endpoint_id=settings.vector_search_index_endpoint_id,
     gcs_bucket_name=GCS_BUCKET_NAME,
     stream_update=True,
 )

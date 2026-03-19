@@ -15,11 +15,11 @@ import traceback
 from datetime import datetime
 from typing import Optional
 
-# Ensure UTF-8 output on Windows terminals to avoid charmap errors
-if sys.stdout.encoding.lower() != 'utf-8' and hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8')
+# # Ensure UTF-8 output on Windows terminals to avoid charmap errors
+# if sys.stdout.encoding.lower() != 'utf-8' and hasattr(sys.stdout, 'reconfigure'):
+#     sys.stdout.reconfigure(encoding='utf-8')
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -30,6 +30,12 @@ from pydantic import BaseModel
 # ---------------------------------------------------------------------------
 from agent import ProcurementSupervisor
 from rag import ingest_data_from_gcs, ask_question, vector_store, embeddings, llm as rag_llm
+from rag import (
+    PROJECT_ID, REGION, GCS_BUCKET_NAME, GCS_PREFIX,
+        vector_store, embeddings, llm,
+)
+import sys, platform
+
 
 # LangChain / Pipeline Imports
 from langchain_core.prompts import ChatPromptTemplate
@@ -44,13 +50,13 @@ from langchain_classic.retrievers.document_compressors import LLMChainExtractor
 # ---------------------------------------------------------------------------
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-
+from config.settings import settings
 # ---------------------------------------------------------------------------
 # App Initialisation
 # ---------------------------------------------------------------------------
 app = FastAPI(
-    title="Procurement Intelligence API",
-    version="1.0.0",
+    title= settings.app_name,
+    version=settings.app_version,
     description="Multi-agent procurement audit & RAG document intelligence backend.",
 )
 
@@ -82,11 +88,7 @@ def health():
 @app.get("/api/status")
 def system_status():
     """Return real-time system configuration and health information."""
-    from rag import (
-        PROJECT_ID, REGION, GCS_BUCKET_NAME, GCS_PREFIX,
-        vector_store, embeddings, llm,
-    )
-    import sys, platform
+    
 
     uptime_seconds = int((datetime.utcnow() - _server_start_time).total_seconds())
     hours, remainder = divmod(uptime_seconds, 3600)
@@ -96,12 +98,12 @@ def system_status():
     try:
         index_id = vector_store._searcher._index.resource_name
     except Exception:
-        index_id = "projects/745639784437/locations/us-central1/indexes/340754046610571264"
+        index_id = "NA"
 
     try:
         endpoint_id = vector_store._searcher._index_endpoint.resource_name
     except Exception:
-        endpoint_id = "projects/745639784437/locations/us-central1/indexEndpoints/289965405500342272"
+        endpoint_id = "NA"
 
     return {
         "backend": {
@@ -111,12 +113,12 @@ def system_status():
             "platform": platform.system(),
         },
         "gcp": {
-            "project_id": PROJECT_ID,
-            "region": REGION,
+            "project_id": settings.GCP_PROJECT,
+            "region": settings.GCP_REGION,
         },
         "storage": {
-            "gcs_bucket": GCS_BUCKET_NAME,
-            "gcs_prefix": GCS_PREFIX,
+            "gcs_bucket": settings.GCS_BUCKET_NAME,
+            "gcs_prefix": settings.GCS_PREFIX,
         },
         "vector_search": {
             "index_id": index_id,
@@ -124,8 +126,8 @@ def system_status():
             "stream_update": True,
         },
         "models": {
-            "embedding": "text-embedding-004",
-            "llm": "gemini-2.5-pro",
+            "embedding": settings.embedding_model_name,
+            "llm": settings.llm_model_name,
             "llm_framework": "Vertex AI / LangChain",
         },
         "ingestion": {
@@ -249,9 +251,9 @@ async def upload_documents(files: list[UploadFile] = File(...)):
 
             # Upload original PDF to GCS under uploads/ so it's persisted in the bucket
             try:
-                from google.cloud import storage as gcs
-                from rag import PROJECT_ID, GCS_BUCKET_NAME, GCS_PREFIX
-                gcs_client = gcs.Client(project=PROJECT_ID)
+                
+                from google.cloud import storage
+                gcs_client = storage.Client(project=PROJECT_ID)
                 bucket = gcs_client.bucket(GCS_BUCKET_NAME)
                 gcs_path = f"{GCS_PREFIX}{upload.filename}"
                 blob = bucket.blob(gcs_path)
@@ -322,34 +324,22 @@ def trigger_gcs_ingestion():
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================
-# FRONTEND STATIC SERVING (CATCH-ALL)
+# Serve Frontend Static Files (for unified Docker deployment)
 # ============================================================
-# This must come AFTER all API routes to avoid shadowing them.
 
-# Check if the frontend dist exists (we are running in the unified container)
-# Try standard sibling path first, then container subfolder path
-frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
-if not os.path.isdir(frontend_dir):
-    frontend_dir = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+frontend_dist = os.path.join(os.path.dirname(__file__), "../frontend/dist")
 
-if os.path.isdir(frontend_dir):
-    print(f"Serving frontend from {frontend_dir}")
-    # Mount assets folder explicitly if it exists
-    assets_dir = os.path.join(frontend_dir, "assets")
-    if os.path.isdir(assets_dir):
-        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
-        
-    # Catch-all route to serve the SPA index.html for unknown paths
-    @app.get("/{full_path:path}")
-    async def serve_frontend(request: Request, full_path: str):
-        # Prevent shadowing API routes completely
-        if full_path.startswith("api/"):
-            raise HTTPException(status_code=404, detail="API route not found")
-            
-        # Try to serve requested file if it exists (e.g., favicon.ico, images)
-        file_path = os.path.join(frontend_dir, full_path)
+if os.path.exists(frontend_dist):
+    # Mount assets so they are served quickly
+    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
+
+    # Catch-all route to serve files or fallback to index.html for React Router
+    @app.get("/{catchall:path}")
+    def serve_frontend(catchall: str):
+        file_path = os.path.join(frontend_dist, catchall)
         if os.path.isfile(file_path):
             return FileResponse(file_path)
-            
-        # Otherwise, fall back to React's index.html
-        return FileResponse(os.path.join(frontend_dir, "index.html"))
+        return FileResponse(os.path.join(frontend_dist, "index.html"))
+else:
+    print(f"Warning: {frontend_dist} not found. Frontend will not be served.")
+

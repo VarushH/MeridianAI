@@ -6,7 +6,8 @@ from langchain_google_vertexai import (
 )
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
-
+from config.settings import settings
+from llm import get_llm
 # ==========================================
 # STEP 1: DEFINE COMPLEX TOOLSETS
 # ==========================================
@@ -59,7 +60,7 @@ def categorize_expense(amount: float, item_description: str) -> str:
 # STEP 2: LLM & AGENT CREATION
 # ==========================================
 
-llm = ChatVertexAI(model_name="gemini-2.5-pro")
+llm = get_llm()
 
 
 def create_specialized_agent(tools, system_prompt):

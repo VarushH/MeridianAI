@@ -6,6 +6,7 @@ pydantic==2.12.5
 # Original dependencies from agent.py & rag.py
 langchain==1.2.11
 langchain-google-vertexai==3.2.2
+langchain-google-genai
 langchain-core==1.2.18
 langchain-community==0.4.1
 langchain-classic==1.0.2
