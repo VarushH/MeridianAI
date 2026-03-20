@@ -1,51 +1,159 @@
-name: Build and Deploy to Cloud Run
+name: Deploy to GCP Cloud Run
 
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: us-central1
-  REPO_NAME: meridianai-repo
-  SERVICE: meridianai-service
+  SERVICE_NAME: meridian-ai-cloud-run
+  IMAGE_NAME: gcr.io/${{ secrets.GCP_PROJECT_ID }}/meridian-ai-cloud-run
+  DOC_BUCKET: gs://${{ secrets.GCP_PROJECT_ID }}-documents
+  VECTOR_BUCKET: gs://${{ secrets.GCP_PROJECT_ID }}-vector-staging
+  INDEX_NAME: financial-docs-production
+  ENDPOINT_NAME: financial-docs-endpoint
 
 jobs:
   deploy:
+    name: Provision & Deploy
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          credentials_json: ${{ secrets.GCP_CREDENTIALS_JSON }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
 
-      - name: Configure Docker to use Artifact Registry
+      # --- Phase 1: Enable APIs ---
+      - name: Enable Required GCP APIs
         run: |
-          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+          gcloud services enable \
+            aiplatform.googleapis.com \
+            run.googleapis.com \
+            secretmanager.googleapis.com \
+            storage.googleapis.com \
+            logging.googleapis.com \
+            monitoring.googleapis.com \
+            cloudtrace.googleapis.com \
+            artifactregistry.googleapis.com \
+            bigquery.googleapis.com \
+            cloudbuild.googleapis.com
 
+      # --- Phase 2: Storage Buckets ---
+      - name: Ensure Storage Buckets Exist
+        run: |
+          # Check and create Document Bucket
+          if ! gcloud storage buckets describe ${{ env.DOC_BUCKET }} >/dev/null 2>&1; then
+            echo "Creating document storage bucket..."
+            gcloud storage buckets create ${{ env.DOC_BUCKET }} --location=${{ env.REGION }} --uniform-bucket-level-access --public-access-prevention
+          else
+            echo "Document bucket already exists."
+          fi
+
+          # Check and create Vector Staging Bucket
+          if ! gcloud storage buckets describe ${{ env.VECTOR_BUCKET }} >/dev/null 2>&1; then
+            echo "Creating vector staging bucket..."
+            gcloud storage buckets create ${{ env.VECTOR_BUCKET }} --location=${{ env.REGION }} --uniform-bucket-level-access --public-access-prevention
+          else
+            echo "Vector bucket already exists."
+          fi
+
+      # --- Phase 3: Vector Search Provisioning ---
+      - name: Ensure Initial Embeddings File Exists
+        run: |
+          # Generate file if it wasn't committed to repo
+          python generate_json.py
+          gcloud storage cp init_embeddings.json ${{ env.VECTOR_BUCKET }}/index-data/
+
+      - name: Provision Vector Search Index & Endpoint
+        run: |
+          # 1. Ensure Index Exists
+          INDEX_ID=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.INDEX_NAME }}")
+          
+          if [ -z "$INDEX_ID" ]; then
+            echo "Creating Vector Search Index. This will take ~25-30 minutes."
+            gcloud ai indexes create \
+              --display-name=${{ env.INDEX_NAME }} \
+              --description="Vector search index for financial documents" \
+              --metadata-file=index_metadata.json \
+              --index-update-method=STREAM_UPDATE \
+              --region=${{ env.REGION }}
+            
+            # Fetch the newly created ID
+            INDEX_ID=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.INDEX_NAME }}")
+          else
+            echo "Index already exists: $INDEX_ID"
+          fi
+
+          # 2. Ensure Endpoint Exists
+          ENDPOINT_ID=$(gcloud ai index-endpoints list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.ENDPOINT_NAME }}")
+          
+          if [ -z "$ENDPOINT_ID" ]; then
+            echo "Creating Vector Search Endpoint..."
+            gcloud ai index-endpoints create \
+              --display-name=${{ env.ENDPOINT_NAME }} \
+              --description="Endpoint for financial document search" \
+              --region=${{ env.REGION }}
+            
+            ENDPOINT_ID=$(gcloud ai index-endpoints list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.ENDPOINT_NAME }}")
+          else
+            echo "Endpoint already exists: $ENDPOINT_ID"
+          fi
+
+          # 3. Ensure Index is Deployed to Endpoint
+          DEPARTED=$(gcloud ai index-endpoints describe $ENDPOINT_ID --region=${{ env.REGION }} --format="value(deployedIndexes[0].id)")
+          if [ -z "$DEPARTED" ]; then
+            echo "Deploying Index to Endpoint. This will take ~25-30 minutes."
+            gcloud ai index-endpoints deploy-index $ENDPOINT_ID \
+              --deployed-index-id=deployed_financial_docs \
+              --display-name=financial-docs-deployed \
+              --index=$INDEX_ID \
+              --region=${{ env.REGION }}
+          else
+             echo "Index is already deployed to endpoint."
+          fi
+
+          # Output these IDs so the Cloud Run step can use them
+          echo "INDEX_ID=$INDEX_ID" >> $GITHUB_ENV
+          echo "ENDPOINT_ID=$ENDPOINT_ID" >> $GITHUB_ENV
+
+      # --- Phase 4: Secrets ---
+      - name: Ensure Secret Manager Has API Key
+        run: |
+          # Create secret container if it doesn't exist
+          if ! gcloud secrets describe GOOGLE_API_KEY >/dev/null 2>&1; then
+            echo "Creating GOOGLE_API_KEY secret..."
+            gcloud secrets create GOOGLE_API_KEY --replication-policy="automatic"
+            # Since GitHub Actions shouldn't know the plain API key, the user must manually set the value via:
+            # echo -n "AIz..." | gcloud secrets versions add GOOGLE_API_KEY --data-file=-
+            echo "WARNING: You must manually add a version to GOOGLE_API_KEY in Secret Manager before your app works!"
+          else
+            echo "Secret GOOGLE_API_KEY already exists."
+          fi
+
+      # --- Phase 5: Build & Deploy Application ---
       - name: Build and Push Docker Image
         run: |
-          IMAGE_TAG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE }}:${{ github.sha }}"
-          docker build -t "$IMAGE_TAG" -f Dockerfile .
-          docker push "$IMAGE_TAG"
+          gcloud builds submit --tag ${{ env.IMAGE_NAME }} .
 
       - name: Deploy to Cloud Run
-        uses: google-github-actions/deploy-cloudrun@v2
-        with:
-          service: ${{ env.SERVICE }}
-          region: ${{ env.REGION }}
-          image: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO_NAME }}/${{ env.SERVICE }}:${{ github.sha }}
-          flags: |
-            --allow-unauthenticated
-            --timeout=3600
-            --memory=2048Mi
-            --cpu=1
-            --service-account=meridianai-runtime@${{ env.PROJECT_ID }}.iam.gserviceaccount.com
-            --set-env-vars=GCP_PROJECT=${{ env.PROJECT_ID }},GCP_REGION=${{ env.REGION }}
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image ${{ env.IMAGE_NAME }} \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 8080 \
+            --set-env-vars="ENVIRONMENT=production,GCP_PROJECT_ID=${{ env.PROJECT_ID }},GCP_REGION=${{ env.REGION }},GCS_BUCKET_NAME=meridian-platform-ai-vector-staging,GCS_PREFIX=uploads/,VERTEX_LLM_MODEL_NAME=gemini-2.5-pro,VERTEX_EMBEDDING_MODEL_NAME=gemini-embedding-2-preview,VECTOR_SEARCH_INDEX_ID=${{ env.INDEX_ID }},VECTOR_SEARCH_INDEX_ENDPOINT_ID=${{ env.ENDPOINT_ID }}" \
+            --update-secrets="GOOGLE_API_KEY=GOOGLE_API_KEY:latest"

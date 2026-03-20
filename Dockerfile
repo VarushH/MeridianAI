@@ -13,8 +13,8 @@ FROM python:3.11-slim AS backend-builder
 WORKDIR /app
 
 # Set environment variables for Python
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 # Install system dependencies if required by some Python packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -38,4 +38,6 @@ COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 EXPOSE 8080
 
 # Start the application using Uvicorn
-CMD ["uvicorn", "main:app", "--app-dir", "backend", "--host", "0.0.0.0", "--port", "8080"]
+# Use shell form to allow environment variable expansion for PORT
+CMD uvicorn api.main:app --app-dir backend --host 0.0.0.0 --port ${PORT:-8080}
+

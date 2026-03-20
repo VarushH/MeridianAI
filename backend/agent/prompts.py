@@ -1,77 +1,3 @@
-import os
-from typing import List, Dict, Optional
-from langchain_google_vertexai import (
-    VertexAIEmbeddings,
-    ChatVertexAI,
-)
-from langchain_core.tools import tool
-from langgraph.prebuilt import create_react_agent
-from config.settings import settings
-from llm import get_llm
-# ==========================================
-# STEP 1: DEFINE COMPLEX TOOLSETS
-# ==========================================
-
-# --- Agent 1 Tools: Risk & Compliance ---
-@tool
-def check_sanctions_list(vendor_name: str) -> str:
-    """Checks if a vendor is on global restricted/sanctioned entities lists."""
-    restricted = ["BlacklistCorp", "ShadowTrade LLC"]
-    if vendor_name in restricted:
-        return "RED ALERT: Vendor is on the Global Sanctions List. DO NOT PROCEED."
-    return "SUCCESS: Vendor cleared for trade."
-
-@tool
-def get_vendor_credit_score(vendor_name: str) -> int:
-    """Retrieves vendor creditworthiness from external databases (e.g., Dun & Bradstreet)."""
-    return 85 if len(vendor_name) > 5 else 40
-
-# --- Agent 2 Tools: Tax & Treasury ---
-@tool
-def calculate_cross_border_tax(amount: float, origin: str, destination: str) -> Dict:
-    """Calculates VAT/GST and Import Duties for cross-border transactions."""
-    tax_rates = {"DE_IN": 0.18, "US_IN": 0.12, "UK_IN": 0.20}
-    key = f"{origin}_{destination}"
-    rate = tax_rates.get(key, 0.15)
-    return {"tax_amount": amount * rate, "rate": rate, "route": key}
-
-@tool
-def validate_fx_hedge(currency_pair: str, rate_used: float) -> str:
-    """Checks if the FX rate used matches the MNC's internal hedged rate for the month."""
-    hedged_rates = {"EUR_INR": 91.5, "USD_INR": 83.2}
-    market_rate = hedged_rates.get(currency_pair, 0)
-    if market_rate == 0:
-        return f"FX WARNING: No hedged rate found for '{currency_pair}'."
-    variance = abs(rate_used - market_rate) / market_rate
-    if variance > 0.05:
-        return f"FX ALERT: Variance {variance:.2%} exceeds 5% limit. Audit required."
-    return "FX SUCCESS: Rate within acceptable hedge variance."
-
-# --- Agent 3 Tools: Financial Control ---
-@tool
-def categorize_expense(amount: float, item_description: str) -> str:
-    """Determines if the expense is Capital Expenditure (CapEx) or Operational (OpEx)."""
-    if amount > 50000 or "server" in item_description.lower():
-        return "CLASSIFICATION: CapEx (Depreciate over 3 years)"
-    return "CLASSIFICATION: OpEx (Immediate deduction)"
-
-
-# ==========================================
-# STEP 2: LLM & AGENT CREATION
-# ==========================================
-
-llm = get_llm()
-
-
-def create_specialized_agent(tools, system_prompt):
-    """Creates a LangGraph react agent with the given tools and system prompt."""
-    return create_react_agent(
-        model=llm,
-        tools=tools,
-        prompt=system_prompt,
-    )
-
-
 # ==========================================
 # STEP 3: DEFINE SPECIALIZED AGENTS (IMPROVED PROMPTS)
 # ==========================================
@@ -88,7 +14,7 @@ DECISION FRAMEWORK:
 1. Run `check_sanctions_list` first — this is a hard blocker. A RED ALERT means immediate rejection; no further analysis is needed.
 2. Run `get_vendor_credit_score` next. Apply the following thresholds:
    - Score ≥ 75 → LOW RISK: Standard Net-30 payment terms acceptable.
-   - Score 50–74 → MODERATE RISK: Require upfront deposit (25–50%) or a letter of credit.
+   - Score 50-74 → MODERATE RISK: Require upfront deposit (25–50%) or a letter of credit.
    - Score < 50  → HIGH RISK: Escalate to CFO. Consider rejecting or requiring full prepayment + guarantees.
 
 OUTPUT FORMAT — always respond in this exact structure:
@@ -166,29 +92,7 @@ CONTROL VERDICT: [APPROVED / FLAGGED FOR REVIEW / REJECTED]
 Be thorough but concise. A misclassification costs the company money — accuracy is paramount.
 """
 
-# ==========================================
-# STEP 4: INSTANTIATE AGENTS
-# ==========================================
 
-risk_agent = create_specialized_agent(
-    [check_sanctions_list, get_vendor_credit_score],
-    RISK_AGENT_PROMPT,
-)
-
-tax_agent = create_specialized_agent(
-    [calculate_cross_border_tax, validate_fx_hedge],
-    TAX_AGENT_PROMPT,
-)
-
-control_agent = create_specialized_agent(
-    [categorize_expense],
-    CONTROL_AGENT_PROMPT,
-)
-
-
-# ==========================================
-# STEP 5: ORCHESTRATION (THE SUPERVISOR)
-# ==========================================
 
 SYNTHESIS_PROMPT_TEMPLATE = """
 You are the Chief Financial Officer (CFO) of a multinational corporation.
@@ -250,77 +154,3 @@ Signed,
 CFO Office
 ════════════════════════════════════════════
 """
-
-
-class ProcurementSupervisor:
-    def __init__(self):
-        self.llm = llm
-
-    def _invoke_agent(self, agent, request: str) -> str:
-        """Invoke a LangGraph agent and extract the final AI message content."""
-        result = agent.invoke(
-            {"messages": [{"role": "user", "content": request}]}
-        )
-        content = result["messages"][-1].content
-        # create_react_agent may return content as a list of content blocks
-        # e.g. [{'type': 'text', 'text': '...'}, ...]
-        if isinstance(content, list):
-            return "\n".join(
-                block.get("text", "") for block in content
-                if isinstance(block, dict) and block.get("type") == "text"
-            )
-        return content
-
-    def run_audit(self, request: str) -> dict:
-        print("\n--- PHASE 1: Risk & Compliance ---")
-        risk_result = self._invoke_agent(risk_agent, request)
-        print(f"Risk Result:\n{risk_result}")
-
-        print("\n--- PHASE 2: Tax & Treasury ---")
-        tax_result = self._invoke_agent(tax_agent, request)
-        print(f"Tax Result:\n{tax_result}")
-
-        print("\n--- PHASE 3: Financial Control ---")
-        control_result = self._invoke_agent(control_agent, request)
-        print(f"Control Result:\n{control_result}")
-
-        # Final Synthesis by the Supervisor (CFO)
-        synthesis_prompt = SYNTHESIS_PROMPT_TEMPLATE.format(
-            risk_result=risk_result,
-            tax_result=tax_result,
-            control_result=control_result,
-        )
-
-        print("\n--- PHASE 4: CFO Synthesis ---")
-        cfo_memo = self.llm.invoke(synthesis_prompt).content
-        print(cfo_memo)
-        return {
-            "risk_result": risk_result,
-            "tax_result": tax_result,
-            "control_result": control_result,
-            "cfo_memo": cfo_memo,
-        }
-
-
-
-# ==========================================
-# STEP 5: EXECUTION
-# ==========================================
-
-if __name__ == "__main__":
-    supervisor = ProcurementSupervisor()
-
-    complex_request = """
-    Purchase Request:
-    - Vendor: ShadowTrade LLC
-    - Item: High-performance AI GPU Servers
-    - Total Cost: 120,000 EUR
-    - Destination: India Branch
-    - FX Rate quoted: 1 EUR = 98 INR
-    """
-
-    final_memo = supervisor.run_audit(complex_request)
-    print("\n" + "="*50)
-    print("FINAL CFO MEMO")
-    print("="*50)
-    print(final_memo)

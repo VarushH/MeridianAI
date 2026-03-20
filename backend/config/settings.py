@@ -32,6 +32,8 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+from logger import GLOBAL_LOGGER as log
+
 # Post-initialization: Set GOOGLE_APPLICATION_CREDENTIALS if path is provided
 if settings.gcp_service_account_path:
     # Try to resolve relative to project root (where .env usually is)
@@ -39,7 +41,7 @@ if settings.gcp_service_account_path:
     abs_path = os.path.abspath(settings.gcp_service_account_path)
     if os.path.exists(abs_path):
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = abs_path
-        print(f"INFO: Google Application Credentials set to {abs_path}")
+        log.info("Google Application Credentials set", path=abs_path)
     else:
         # Try relative to the current working directory if absolute didn't exist
-        print(f"WARNING: Service account file not found at {abs_path}")
+        log.warning("Service account file not found", path=abs_path)
