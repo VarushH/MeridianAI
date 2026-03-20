@@ -48,7 +48,9 @@ jobs:
             cloudtrace.googleapis.com \
             artifactregistry.googleapis.com \
             bigquery.googleapis.com \
-            cloudbuild.googleapis.com
+            cloudbuild.googleapis.com \
+            cloudresourcemanager.googleapis.com \
+            iam.googleapis.com
 
       # --- Phase 2: Storage Buckets ---
       - name: Ensure Storage Buckets Exist
