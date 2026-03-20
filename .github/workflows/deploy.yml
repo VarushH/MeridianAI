@@ -194,3 +194,9 @@ jobs:
             --port 8080 \
             --set-env-vars="ENVIRONMENT=production,GCP_PROJECT_ID=${{ env.PROJECT_ID }},GCP_REGION=${{ env.REGION }},GCS_BUCKET_NAME=${{ env.PROJECT_ID }}-vector-staging,GCS_PREFIX=uploads/,VERTEX_LLM_MODEL_NAME=gemini-2.5-pro,VERTEX_EMBEDDING_MODEL_NAME=gemini-embedding-2-preview,VECTOR_SEARCH_INDEX_ID=${{ env.INDEX_ID }},VECTOR_SEARCH_INDEX_ENDPOINT_ID=${{ env.ENDPOINT_ID }}" \
             --update-secrets="GOOGLE_API_KEY=GOOGLE_API_KEY:latest"
+
+          echo "Ensuring Cloud Run service is universally accessible..."
+          gcloud run services add-iam-policy-binding ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --member="allUsers" \
+            --role="roles/run.invoker" || echo "WARNING: Could not grant public access. You may need to disable Domain Restricted Sharing on your Google Cloud Org."
