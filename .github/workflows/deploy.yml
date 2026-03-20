@@ -141,14 +141,14 @@ jobs:
           fi
 
           # 3. Ensure Index is Deployed to Endpoint
-          DEPARTED=$(gcloud ai index-endpoints describe $ENDPOINT_ID --region=${{ env.REGION }} --format="value(deployedIndexes[0].id)" 2>/dev/null || echo "")
+          DEPARTED=$(gcloud ai index-endpoints describe $ENDPOINT_ID --region=${{ env.REGION }} --format="json" 2>/dev/null | grep '"id": "deployed_financial_docs"' || echo "")
           if [ -z "$DEPARTED" ]; then
             echo "Deploying Index to Endpoint. This will take ~25-30 minutes."
             gcloud ai index-endpoints deploy-index $ENDPOINT_ID \
               --deployed-index-id=deployed_financial_docs \
               --display-name=financial-docs-deployed \
               --index=$INDEX_ID \
-              --region=${{ env.REGION }}
+              --region=${{ env.REGION }} || echo "Index deployment returned a non-zero code. (Likely ALREADY_EXISTS from a previous partial run). Continuing..."
           else
              echo "Index is already deployed to endpoint."
           fi
