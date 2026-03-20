@@ -170,6 +170,13 @@ jobs:
           echo -n "${{ secrets.GOOGLE_API_KEY }}" | gcloud secrets versions add GOOGLE_API_KEY --data-file=-
           echo "Successfully updated GOOGLE_API_KEY with the latest GitHub Secret value."
 
+          # Grant Cloud Run service account access to Secret Manager
+          echo "Granting Secret Manager permissions to Cloud Run Service Account..."
+          PROJECT_NUMBER=$(gcloud projects describe ${{ env.PROJECT_ID }} --format="value(projectNumber)")
+          gcloud projects add-iam-policy-binding ${{ env.PROJECT_ID }} \
+            --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+            --role="roles/secretmanager.secretAccessor" >/dev/null
+
       # --- Phase 5: Build & Deploy Application ---
       - name: Build and Push Docker Image
         run: |
