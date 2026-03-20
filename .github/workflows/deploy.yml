@@ -78,6 +78,9 @@ jobs:
 
       - name: Provision Vector Search Index & Endpoint
         run: |
+          # 0. Inject the exact bucket name into the metadata to avoid hardcoding mismatches
+          jq ".contentsDeltaUri = \"${{ env.VECTOR_BUCKET }}/index-data\"" index_metadata.json > temp.json && mv temp.json index_metadata.json
+
           # 1. Ensure Index Exists
           INDEX_ID=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.INDEX_NAME }}" --limit=1)
           
