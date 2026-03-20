@@ -78,43 +78,70 @@ jobs:
 
       - name: Provision Vector Search Index & Endpoint
         run: |
-          # 0. Inject the exact bucket name into the metadata to avoid hardcoding mismatches
-          jq ".contentsDeltaUri = \"${{ env.VECTOR_BUCKET }}/index-data\"" index_metadata.json > temp.json && mv temp.json index_metadata.json
+          # 0. Dynamically generate the index_metadata.json
+          cat <<EOF > index_metadata.json
+          {
+            "contentsDeltaUri": "${{ env.VECTOR_BUCKET }}/index-data",
+            "config": {
+              "dimensions": 768,
+              "approximateNeighborsCount": 150,
+              "distanceMeasureType": "DOT_PRODUCT_DISTANCE",
+              "shardSize": "SHARD_SIZE_MEDIUM",
+              "algorithm_config": {
+                "treeAhConfig": {
+                  "leafNodeEmbeddingCount": 1000,
+                  "leafNodesToSearchPercent": 10
+                }
+              }
+            }
+          }
+          EOF
 
           # 1. Ensure Index Exists
-          INDEX_ID=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.INDEX_NAME }}" --limit=1)
+          RAW_INDEX=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.INDEX_NAME }}" --limit=1)
+          INDEX_ID=$(echo "$RAW_INDEX" | grep -o 'projects/[0-9]*/locations/[a-z0-9-]*/indexes/[0-9]*' | head -n 1)
           
           if [ -z "$INDEX_ID" ]; then
             echo "Creating Vector Search Index. This will take ~25-30 minutes."
-            INDEX_ID=$(gcloud ai indexes create \
+            RAW_CREATE=$(gcloud ai indexes create \
               --display-name=${{ env.INDEX_NAME }} \
               --description="Vector search index for financial documents" \
               --metadata-file=index_metadata.json \
               --index-update-method=STREAM_UPDATE \
               --region=${{ env.REGION }} \
               --format="value(name)")
+            INDEX_ID=$(echo "$RAW_CREATE" | grep -o 'projects/[0-9]*/locations/[a-z0-9-]*/indexes/[0-9]*' | head -n 1)
+            
+            # Fallback if create output capture fails due to eventual consistency
+            if [ -z "$INDEX_ID" ]; then
+               sleep 15
+               RAW_INDEX=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.INDEX_NAME }}" --limit=1)
+               INDEX_ID=$(echo "$RAW_INDEX" | grep -o 'projects/[0-9]*/locations/[a-z0-9-]*/indexes/[0-9]*' | head -n 1)
+            fi
             echo "Created Index: $INDEX_ID"
           else
             echo "Index already exists: $INDEX_ID"
           fi
 
           # 2. Ensure Endpoint Exists
-          ENDPOINT_ID=$(gcloud ai index-endpoints list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.ENDPOINT_NAME }}" --limit=1)
+          RAW_ENDPOINT=$(gcloud ai index-endpoints list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.ENDPOINT_NAME }}" --limit=1)
+          ENDPOINT_ID=$(echo "$RAW_ENDPOINT" | grep -o 'projects/[0-9]*/locations/[a-z0-9-]*/indexEndpoints/[0-9]*' | head -n 1)
           
           if [ -z "$ENDPOINT_ID" ]; then
             echo "Creating Vector Search Endpoint..."
-            ENDPOINT_ID=$(gcloud ai index-endpoints create \
+            RAW_CREATE_EP=$(gcloud ai index-endpoints create \
               --display-name=${{ env.ENDPOINT_NAME }} \
               --description="Endpoint for financial document search" \
               --region=${{ env.REGION }} \
               --format="value(name)")
+            ENDPOINT_ID=$(echo "$RAW_CREATE_EP" | grep -o 'projects/[0-9]*/locations/[a-z0-9-]*/indexEndpoints/[0-9]*' | head -n 1)
             echo "Created Endpoint: $ENDPOINT_ID"
           else
             echo "Endpoint already exists: $ENDPOINT_ID"
           fi
 
           # 3. Ensure Index is Deployed to Endpoint
-          DEPARTED=$(gcloud ai index-endpoints describe $ENDPOINT_ID --region=${{ env.REGION }} --format="value(deployedIndexes[0].id)")
+          DEPARTED=$(gcloud ai index-endpoints describe $ENDPOINT_ID --region=${{ env.REGION }} --format="value(deployedIndexes[0].id)" 2>/dev/null || echo "")
           if [ -z "$DEPARTED" ]; then
             echo "Deploying Index to Endpoint. This will take ~25-30 minutes."
             gcloud ai index-endpoints deploy-index $ENDPOINT_ID \
