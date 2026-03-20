@@ -79,34 +79,33 @@ jobs:
       - name: Provision Vector Search Index & Endpoint
         run: |
           # 1. Ensure Index Exists
-          INDEX_ID=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.INDEX_NAME }}")
+          INDEX_ID=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.INDEX_NAME }}" --limit=1)
           
           if [ -z "$INDEX_ID" ]; then
             echo "Creating Vector Search Index. This will take ~25-30 minutes."
-            gcloud ai indexes create \
+            INDEX_ID=$(gcloud ai indexes create \
               --display-name=${{ env.INDEX_NAME }} \
               --description="Vector search index for financial documents" \
               --metadata-file=index_metadata.json \
               --index-update-method=STREAM_UPDATE \
-              --region=${{ env.REGION }}
-            
-            # Fetch the newly created ID
-            INDEX_ID=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.INDEX_NAME }}")
+              --region=${{ env.REGION }} \
+              --format="value(name)")
+            echo "Created Index: $INDEX_ID"
           else
             echo "Index already exists: $INDEX_ID"
           fi
 
           # 2. Ensure Endpoint Exists
-          ENDPOINT_ID=$(gcloud ai index-endpoints list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.ENDPOINT_NAME }}")
+          ENDPOINT_ID=$(gcloud ai index-endpoints list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.ENDPOINT_NAME }}" --limit=1)
           
           if [ -z "$ENDPOINT_ID" ]; then
             echo "Creating Vector Search Endpoint..."
-            gcloud ai index-endpoints create \
+            ENDPOINT_ID=$(gcloud ai index-endpoints create \
               --display-name=${{ env.ENDPOINT_NAME }} \
               --description="Endpoint for financial document search" \
-              --region=${{ env.REGION }}
-            
-            ENDPOINT_ID=$(gcloud ai index-endpoints list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.ENDPOINT_NAME }}")
+              --region=${{ env.REGION }} \
+              --format="value(name)")
+            echo "Created Endpoint: $ENDPOINT_ID"
           else
             echo "Endpoint already exists: $ENDPOINT_ID"
           fi
@@ -133,14 +132,13 @@ jobs:
         run: |
           # Create secret container if it doesn't exist
           if ! gcloud secrets describe GOOGLE_API_KEY >/dev/null 2>&1; then
-            echo "Creating GOOGLE_API_KEY secret..."
+            echo "Creating GOOGLE_API_KEY secret container..."
             gcloud secrets create GOOGLE_API_KEY --replication-policy="automatic"
-            # Since GitHub Actions shouldn't know the plain API key, the user must manually set the value via:
-            # echo -n "AIz..." | gcloud secrets versions add GOOGLE_API_KEY --data-file=-
-            echo "WARNING: You must manually add a version to GOOGLE_API_KEY in Secret Manager before your app works!"
-          else
-            echo "Secret GOOGLE_API_KEY already exists."
           fi
+          
+          # Add the latest value from GitHub Secrets as a new version
+          echo -n "${{ secrets.GOOGLE_API_KEY }}" | gcloud secrets versions add GOOGLE_API_KEY --data-file=-
+          echo "Successfully updated GOOGLE_API_KEY with the latest GitHub Secret value."
 
       # --- Phase 5: Build & Deploy Application ---
       - name: Build and Push Docker Image
