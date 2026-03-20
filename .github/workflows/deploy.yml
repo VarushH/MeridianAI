@@ -50,7 +50,8 @@ jobs:
             bigquery.googleapis.com \
             cloudbuild.googleapis.com \
             cloudresourcemanager.googleapis.com \
-            iam.googleapis.com
+            iam.googleapis.com \
+            generativelanguage.googleapis.com
 
       # --- Phase 2: Storage Buckets ---
       - name: Ensure Storage Buckets Exist
@@ -168,9 +169,13 @@ jobs:
             gcloud secrets create GOOGLE_API_KEY --replication-policy="automatic"
           fi
           
-          # Add the latest value from GitHub Secrets as a new version
-          echo -n "${{ secrets.GOOGLE_API_KEY }}" | gcloud secrets versions add GOOGLE_API_KEY --data-file=-
-          echo "Successfully updated GOOGLE_API_KEY with the latest GitHub Secret value."
+          # Sanitize: strip all whitespace, newlines, carriage returns
+          CLEAN_KEY=$(echo -n "${{ secrets.GOOGLE_API_KEY }}" | tr -d '[:space:]')
+          echo "API Key length after sanitization: ${#CLEAN_KEY} characters"
+          
+          # Add the sanitized value as a new secret version
+          echo -n "$CLEAN_KEY" | gcloud secrets versions add GOOGLE_API_KEY --data-file=-
+          echo "Successfully updated GOOGLE_API_KEY with the sanitized GitHub Secret value."
 
           # Grant Cloud Run service account access to Secret Manager
           echo "Granting Secret Manager permissions to Cloud Run Service Account..."
