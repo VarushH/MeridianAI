@@ -80,6 +80,7 @@ jobs:
           gcloud storage cp init_embeddings.json ${{ env.VECTOR_BUCKET }}/index-data/
 
       - name: Provision Vector Search Index & Endpoint
+        timeout-minutes: 70
         run: |
           # 0. Dynamically generate the index_metadata.json
           cat <<EOF > index_metadata.json
@@ -106,21 +107,25 @@ jobs:
           
           if [ -z "$INDEX_ID" ]; then
             echo "Creating Vector Search Index. This will take ~25-30 minutes."
-            RAW_CREATE=$(gcloud ai indexes create \
+            gcloud ai indexes create \
               --display-name=${{ env.INDEX_NAME }} \
               --description="Vector search index for financial documents" \
               --metadata-file=index_metadata.json \
               --index-update-method=STREAM_UPDATE \
-              --region=${{ env.REGION }} \
-              --format="value(name)")
-            INDEX_ID=$(echo "$RAW_CREATE" | grep -o 'projects/[0-9]*/locations/[a-z0-9-]*/indexes/[0-9]*' | head -n 1)
+              --region=${{ env.REGION }}
             
-            # Fallback if create output capture fails due to eventual consistency
-            if [ -z "$INDEX_ID" ]; then
-               sleep 15
-               RAW_INDEX=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.INDEX_NAME }}" --limit=1)
-               INDEX_ID=$(echo "$RAW_INDEX" | grep -o 'projects/[0-9]*/locations/[a-z0-9-]*/indexes/[0-9]*' | head -n 1)
-            fi
+            # After creation completes, use list to get the actual index resource name
+            # (the create command returns an operation name, not the index name)
+            for i in 1 2 3 4 5; do
+              echo "Attempt $i: Looking up newly created index..."
+              RAW_INDEX=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.INDEX_NAME }}" --limit=1)
+              INDEX_ID=$(echo "$RAW_INDEX" | grep -o 'projects/[0-9]*/locations/[a-z0-9-]*/indexes/[0-9]*' | head -n 1)
+              if [ -n "$INDEX_ID" ]; then
+                break
+              fi
+              echo "Index not found yet, waiting 15 seconds..."
+              sleep 15
+            done
             echo "Created Index: $INDEX_ID"
           else
             echo "Index already exists: $INDEX_ID"
