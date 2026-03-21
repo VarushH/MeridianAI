@@ -131,7 +131,21 @@ jobs:
             echo "Index already exists: $INDEX_ID"
           fi
 
-          # 2. Ensure Endpoint Exists
+          # 2. Wait for Index to be fully ACTIVE before deploying
+          echo "Waiting for Index to become ACTIVE..."
+          for attempt in $(seq 1 45); do
+            INDEX_STATE=$(gcloud ai indexes describe $INDEX_ID --region=${{ env.REGION }} --format="value(metadata.config)" 2>/dev/null && echo "READY" || echo "NOT_READY")
+            # Check if the index can be listed and described without error
+            INDEX_CHECK=$(gcloud ai indexes describe $INDEX_ID --region=${{ env.REGION }} --format="value(name)" 2>/dev/null)
+            if [ -n "$INDEX_CHECK" ]; then
+              echo "Index is ACTIVE and ready: $INDEX_CHECK"
+              break
+            fi
+            echo "Attempt $attempt/45: Index not ready yet. Waiting 60 seconds..."
+            sleep 60
+          done
+
+          # 3. Ensure Endpoint Exists
           RAW_ENDPOINT=$(gcloud ai index-endpoints list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.ENDPOINT_NAME }}" --limit=1)
           ENDPOINT_ID=$(echo "$RAW_ENDPOINT" | grep -o 'projects/[0-9]*/locations/[a-z0-9-]*/indexEndpoints/[0-9]*' | head -n 1)
           
@@ -152,13 +166,30 @@ jobs:
           DEPARTED=$(gcloud ai index-endpoints describe $ENDPOINT_ID --region=${{ env.REGION }} --format="json" 2>/dev/null | grep '"id": "deployed_financial_docs"' || echo "")
           if [ -z "$DEPARTED" ]; then
             echo "Deploying Index to Endpoint. This will take ~25-30 minutes."
-            gcloud ai index-endpoints deploy-index $ENDPOINT_ID \
+            DEPLOY_OUTPUT=$(gcloud ai index-endpoints deploy-index $ENDPOINT_ID \
               --deployed-index-id=deployed_financial_docs \
               --display-name=financial-docs-deployed \
               --index=$INDEX_ID \
-              --region=${{ env.REGION }} || echo "Index deployment returned a non-zero code. (Likely ALREADY_EXISTS from a previous partial run). Continuing..."
+              --region=${{ env.REGION }} 2>&1) || {
+              if echo "$DEPLOY_OUTPUT" | grep -q "ALREADY_EXISTS"; then
+                echo "Index already deployed (ALREADY_EXISTS). Continuing..."
+              else
+                echo "ERROR: Index deployment failed with a real error:"
+                echo "$DEPLOY_OUTPUT"
+                exit 1
+              fi
+            }
           else
              echo "Index is already deployed to endpoint."
+          fi
+
+          # Validate IDs before continuing
+          echo "=== Final Validation ==="
+          echo "INDEX_ID=$INDEX_ID"
+          echo "ENDPOINT_ID=$ENDPOINT_ID"
+          if [ -z "$INDEX_ID" ] || [ -z "$ENDPOINT_ID" ]; then
+            echo "ERROR: INDEX_ID or ENDPOINT_ID is empty. Cannot deploy Cloud Run."
+            exit 1
           fi
 
           # Output these IDs so the Cloud Run step can use them
