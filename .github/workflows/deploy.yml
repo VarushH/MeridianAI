@@ -80,9 +80,9 @@ jobs:
           gcloud storage cp init_embeddings.json ${{ env.VECTOR_BUCKET }}/index-data/
 
       - name: Provision Vector Search Index & Endpoint
-        timeout-minutes: 70
+        timeout-minutes: 90 # Increased since deployments can be slow
         run: |
-          # 0. Dynamically generate the index_metadata.json
+          # 0. Generate metadata
           cat <<EOF > index_metadata.json
           {
             "contentsDeltaUri": "${{ env.VECTOR_BUCKET }}/index-data",
@@ -103,128 +103,90 @@ jobs:
 
           # 1. Ensure Index Exists
           RAW_INDEX=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.INDEX_NAME }}" --limit=1)
-          INDEX_ID=$(echo "$RAW_INDEX" | grep -o 'projects/[0-9]*/locations/[a-z0-9-]*/indexes/[0-9]*' | head -n 1)
           
-          if [ -z "$INDEX_ID" ]; then
-            echo "Creating Vector Search Index. This will take ~25-30 minutes."
-            gcloud ai indexes create \
+          if [ -z "$RAW_INDEX" ]; then
+            echo "Creating Vector Search Index..."
+            # Capture the operation ID to wait for it
+            OPERATION_ID=$(gcloud ai indexes create \
               --display-name=${{ env.INDEX_NAME }} \
-              --description="Vector search index for financial documents" \
               --metadata-file=index_metadata.json \
               --index-update-method=STREAM_UPDATE \
-              --region=${{ env.REGION }}
+              --region=${{ env.REGION }} \
+              --format="value(name)")
             
-            # After creation completes, use list to get the actual index resource name
-            # (the create command returns an operation name, not the index name)
-            for i in 1 2 3 4 5; do
-              echo "Attempt $i: Looking up newly created index..."
-              RAW_INDEX=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.INDEX_NAME }}" --limit=1)
-              INDEX_ID=$(echo "$RAW_INDEX" | grep -o 'projects/[0-9]*/locations/[a-z0-9-]*/indexes/[0-9]*' | head -n 1)
-              if [ -n "$INDEX_ID" ]; then
-                break
-              fi
-              echo "Index not found yet, waiting 15 seconds..."
-              sleep 15
-            done
-            echo "Created Index: $INDEX_ID"
+            echo "Waiting for operation $OPERATION_ID to complete..."
+            gcloud ai operations wait $OPERATION_ID --region=${{ env.REGION }}
+            
+            # Now get the ID after it's finished
+            INDEX_ID=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.INDEX_NAME }}" --limit=1)
           else
+            INDEX_ID=$RAW_INDEX
             echo "Index already exists: $INDEX_ID"
           fi
 
-          # 2. Wait for Index to be fully ACTIVE before deploying
-          echo "Waiting for Index to become ACTIVE..."
-          for attempt in $(seq 1 45); do
-            INDEX_STATE=$(gcloud ai indexes describe $INDEX_ID --region=${{ env.REGION }} --format="value(metadata.config)" 2>/dev/null && echo "READY" || echo "NOT_READY")
-            # Check if the index can be listed and described without error
-            INDEX_CHECK=$(gcloud ai indexes describe $INDEX_ID --region=${{ env.REGION }} --format="value(name)" 2>/dev/null)
-            if [ -n "$INDEX_CHECK" ]; then
-              echo "Index is ACTIVE and ready: $INDEX_CHECK"
-              break
-            fi
-            echo "Attempt $attempt/45: Index not ready yet. Waiting 60 seconds..."
-            sleep 60
-          done
-
-          # 3. Ensure Endpoint Exists
+          # 2. Ensure Endpoint Exists
           RAW_ENDPOINT=$(gcloud ai index-endpoints list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.ENDPOINT_NAME }}" --limit=1)
-          ENDPOINT_ID=$(echo "$RAW_ENDPOINT" | grep -o 'projects/[0-9]*/locations/[a-z0-9-]*/indexEndpoints/[0-9]*' | head -n 1)
           
-          if [ -z "$ENDPOINT_ID" ]; then
-            echo "Creating Vector Search Endpoint..."
-            RAW_CREATE_EP=$(gcloud ai index-endpoints create \
+          if [ -z "$RAW_ENDPOINT" ]; then
+            echo "Creating Endpoint..."
+            OPERATION_EP=$(gcloud ai index-endpoints create \
               --display-name=${{ env.ENDPOINT_NAME }} \
-              --description="Endpoint for financial document search" \
               --region=${{ env.REGION }} \
               --format="value(name)")
-            ENDPOINT_ID=$(echo "$RAW_CREATE_EP" | grep -o 'projects/[0-9]*/locations/[a-z0-9-]*/indexEndpoints/[0-9]*' | head -n 1)
-            echo "Created Endpoint: $ENDPOINT_ID"
+            
+            gcloud ai operations wait $OPERATION_EP --region=${{ env.REGION }}
+            ENDPOINT_ID=$(gcloud ai index-endpoints list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.ENDPOINT_NAME }}" --limit=1)
           else
+            ENDPOINT_ID=$RAW_ENDPOINT
             echo "Endpoint already exists: $ENDPOINT_ID"
           fi
 
-          # 3. Ensure Index is Deployed to Endpoint
-          DEPARTED=$(gcloud ai index-endpoints describe $ENDPOINT_ID --region=${{ env.REGION }} --format="json" 2>/dev/null | grep '"id": "deployed_financial_docs"' || echo "")
-          if [ -z "$DEPARTED" ]; then
-            echo "Deploying Index to Endpoint. This will take ~25-30 minutes."
-            DEPLOY_OUTPUT=$(gcloud ai index-endpoints deploy-index $ENDPOINT_ID \
+          # 3. Ensure Index is Deployed
+          # Check if 'deployed_financial_docs' exists in the endpoint's deployedIndexes list
+          IS_DEPLOYED=$(gcloud ai index-endpoints describe $ENDPOINT_ID --region=${{ env.REGION }} --format="value(deployedIndexes.id)" | grep "deployed_financial_docs" || true)
+
+          if [ -z "$IS_DEPLOYED" ]; then
+            echo "Deploying Index to Endpoint. This usually takes 20-30 minutes."
+            DEPLOY_OP=$(gcloud ai index-endpoints deploy-index $ENDPOINT_ID \
               --deployed-index-id=deployed_financial_docs \
               --display-name=financial-docs-deployed \
               --index=$INDEX_ID \
-              --region=${{ env.REGION }} 2>&1) || {
-              if echo "$DEPLOY_OUTPUT" | grep -q "ALREADY_EXISTS"; then
-                echo "Index already deployed (ALREADY_EXISTS). Continuing..."
-              else
-                echo "ERROR: Index deployment failed with a real error:"
-                echo "$DEPLOY_OUTPUT"
-                exit 1
-              fi
-            }
+              --region=${{ env.REGION }} \
+              --format="value(name)")
+            
+            echo "Waiting for deployment operation $DEPLOY_OP..."
+            gcloud ai operations wait $DEPLOY_OP --region=${{ env.REGION }}
+            echo "Deployment complete!"
           else
-             echo "Index is already deployed to endpoint."
+            echo "Index is already deployed."
           fi
 
-          # Validate IDs before continuing
-          echo "=== Final Validation ==="
-          echo "INDEX_ID=$INDEX_ID"
-          echo "ENDPOINT_ID=$ENDPOINT_ID"
-          if [ -z "$INDEX_ID" ] || [ -z "$ENDPOINT_ID" ]; then
-            echo "ERROR: INDEX_ID or ENDPOINT_ID is empty. Cannot deploy Cloud Run."
-            exit 1
-          fi
-
-          # Output these IDs so the Cloud Run step can use them
+          # Final Validation and Export
           echo "INDEX_ID=$INDEX_ID" >> $GITHUB_ENV
           echo "ENDPOINT_ID=$ENDPOINT_ID" >> $GITHUB_ENV
+            # --- Phase 4: Secrets ---
+            - name: Ensure Secret Manager Has API Key
+              run: |
+                # Create secret container if it doesn't exist
+                if ! gcloud secrets describe GOOGLE_API_KEY >/dev/null 2>&1; then
+                  echo "Creating GOOGLE_API_KEY secret container..."
+                  gcloud secrets create GOOGLE_API_KEY --replication-policy="automatic"
+                fi
+                
+                # Sanitize: strip all whitespace, newlines, carriage returns
+                CLEAN_KEY=$(echo -n "${{ secrets.GOOGLE_API_KEY }}" | tr -d '[:space:]')
+                echo "API Key length after sanitization: ${#CLEAN_KEY} characters"
+                
+                # Add the sanitized value as a new secret version
+                echo -n "$CLEAN_KEY" | gcloud secrets versions add GOOGLE_API_KEY --data-file=-
+                echo "Successfully updated GOOGLE_API_KEY with the sanitized GitHub Secret value."
 
-          # 4. Clean up the dummy bootstrap datapoint
-          echo "Removing dummy init_0001 datapoint from index..."
-          gcloud ai indexes remove-datapoints $INDEX_ID \
-            --datapoint-ids=init_0001 \
-            --region=${{ env.REGION }} 2>/dev/null || echo "init_0001 already removed or not found. Continuing..."
-
-      # --- Phase 4: Secrets ---
-      - name: Ensure Secret Manager Has API Key
-        run: |
-          # Create secret container if it doesn't exist
-          if ! gcloud secrets describe GOOGLE_API_KEY >/dev/null 2>&1; then
-            echo "Creating GOOGLE_API_KEY secret container..."
-            gcloud secrets create GOOGLE_API_KEY --replication-policy="automatic"
-          fi
-          
-          # Sanitize: strip all whitespace, newlines, carriage returns
-          CLEAN_KEY=$(echo -n "${{ secrets.GOOGLE_API_KEY }}" | tr -d '[:space:]')
-          echo "API Key length after sanitization: ${#CLEAN_KEY} characters"
-          
-          # Add the sanitized value as a new secret version
-          echo -n "$CLEAN_KEY" | gcloud secrets versions add GOOGLE_API_KEY --data-file=-
-          echo "Successfully updated GOOGLE_API_KEY with the sanitized GitHub Secret value."
-
-          # Grant Cloud Run service account access to Secret Manager
-          echo "Granting Secret Manager permissions to Cloud Run Service Account..."
-          PROJECT_NUMBER=$(gcloud projects describe ${{ env.PROJECT_ID }} --format="value(projectNumber)")
-          gcloud projects add-iam-policy-binding ${{ env.PROJECT_ID }} \
-            --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-            --role="roles/secretmanager.secretAccessor" >/dev/null
+                # Grant Cloud Run service account access to Secret Manager
+                echo "Granting Secret Manager permissions to Cloud Run Service Account..."
+                PROJECT_NUMBER=$(gcloud projects describe ${{ env.PROJECT_ID }} --format="value(projectNumber)")
+                gcloud projects add-iam-policy-binding ${{ env.PROJECT_ID }} \
+                  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+                  --role="roles/secretmanager.secretAccessor" >/dev/null
 
       # --- Phase 5: Build & Deploy Application ---
       - name: Build and Push Docker Image
