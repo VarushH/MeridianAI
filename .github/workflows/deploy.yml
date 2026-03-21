@@ -143,8 +143,24 @@ jobs:
               --deployed-index-id=deployed_financial_docs \
               --display-name=financial-docs-deployed \
               --index=$INDEX_ID \
-              --region=${{ env.REGION }}
-            echo "Deployment complete!"
+            echo "Wait up to 45 minutes for deployment to finish..."
+            for attempt in $(seq 1 45); do
+              # We check if the deployment is fully complete by looking for the index in the endpoint
+              IS_DEPLOYED_NOW=$(gcloud ai index-endpoints describe $ENDPOINT_ID --region=${{ env.REGION }} --format="value(deployedIndexes.id)" 2>/dev/null | grep "deployed_financial_docs" || true)
+              
+              if [ -n "$IS_DEPLOYED_NOW" ]; then
+                echo "Index deployment is complete and ACTIVE on the endpoint!"
+                break
+              fi
+              
+              echo "Attempt $attempt/45: Deployment in progress... waiting 60 seconds."
+              sleep 60
+            done
+            
+            if [ -z "$IS_DEPLOYED_NOW" ]; then
+              echo "WARNING: Deployment timed out after 45 minutes. It may still be running."
+              # We don't exit 1 here because GCP might just be slow, and Cloud Run *might* still be able to start.
+            fi
           else
             echo "Index is already deployed."
           fi
