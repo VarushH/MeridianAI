@@ -143,6 +143,7 @@ jobs:
               --deployed-index-id=deployed_financial_docs \
               --display-name=financial-docs-deployed \
               --index=$INDEX_ID \
+              --region=${{ env.REGION }}
             echo "Wait up to 45 minutes for deployment to finish..."
             for attempt in $(seq 1 45); do
               # We check if the deployment is fully complete by looking for the index in the endpoint
