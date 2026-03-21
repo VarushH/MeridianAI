@@ -170,6 +170,12 @@ jobs:
           echo "INDEX_ID=$INDEX_ID" >> $GITHUB_ENV
           echo "ENDPOINT_ID=$ENDPOINT_ID" >> $GITHUB_ENV
 
+          # 4. Clean up the dummy bootstrap datapoint
+          echo "Removing dummy init_0001 datapoint from index..."
+          gcloud ai indexes remove-datapoints $INDEX_ID \
+            --datapoint-ids=init_0001 \
+            --region=${{ env.REGION }} 2>/dev/null || echo "init_0001 already removed or not found. Continuing..."
+
       # --- Phase 4: Secrets ---
       - name: Ensure Secret Manager Has API Key
         run: |
