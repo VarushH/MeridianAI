@@ -115,7 +115,7 @@ jobs:
               --format="value(name)")
             
             echo "Waiting for operation $OPERATION_ID to complete..."
-            gcloud ai operations wait $OPERATION_ID --region=${{ env.REGION }}
+            gcloud ai-platform operations wait $OPERATION_ID --region=${{ env.REGION }}
             
             # Now get the ID after it's finished
             INDEX_ID=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.INDEX_NAME }}" --limit=1)
@@ -134,7 +134,7 @@ jobs:
               --region=${{ env.REGION }} \
               --format="value(name)")
             
-            gcloud ai operations wait $OPERATION_EP --region=${{ env.REGION }}
+            gcloud ai-platform operations wait $OPERATION_EP --region=${{ env.REGION }}
             ENDPOINT_ID=$(gcloud ai index-endpoints list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.ENDPOINT_NAME }}" --limit=1)
           else
             ENDPOINT_ID=$RAW_ENDPOINT
@@ -155,7 +155,7 @@ jobs:
               --format="value(name)")
             
             echo "Waiting for deployment operation $DEPLOY_OP..."
-            gcloud ai operations wait $DEPLOY_OP --region=${{ env.REGION }}
+            gcloud ai-platform operations wait $DEPLOY_OP --region=${{ env.REGION }}
             echo "Deployment complete!"
           else
             echo "Index is already deployed."
