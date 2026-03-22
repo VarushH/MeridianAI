@@ -1,5 +1,6 @@
 from rag.llm import get_llm
-from langgraph.prebuilt import create_react_agent
+# from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from agent.tools import (check_sanctions_list,get_vendor_credit_score,calculate_cross_border_tax,validate_fx_hedge,categorize_expense)
 from agent.prompts import (RISK_AGENT_PROMPT,TAX_AGENT_PROMPT,CONTROL_AGENT_PROMPT,SYNTHESIS_PROMPT_TEMPLATE)
 from logger import GLOBAL_LOGGER as log
@@ -13,10 +14,15 @@ llm = get_llm()
 
 def create_specialized_agent(tools, system_prompt):
     """Creates a LangGraph react agent with the given tools and system prompt."""
-    return create_react_agent(
+    # return create_react_agent(
+    #     model=llm,
+    #     tools=tools,
+    #     prompt=system_prompt,
+    # )
+    return create_agent(
         model=llm,
         tools=tools,
-        prompt=system_prompt,
+        system_prompt=system_prompt,
     )
 
 # ==========================================
