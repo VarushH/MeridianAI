@@ -97,15 +97,17 @@ jobs:
 
           # 1. Ensure Index Exists
           INDEX_ID=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="display_name=${{ env.INDEX_NAME }}" --limit=1)
-          
+
           if [ -z "$INDEX_ID" ]; then
             echo "Creating Vector Search Index. This command waits synchronously (~25-30 min)..."
             gcloud ai indexes create \
               --display-name=${{ env.INDEX_NAME }} \
               --metadata-file=index_metadata.json \
               --index-update-method=STREAM_UPDATE \
-              --region=${{ env.REGION }}
+              --region=${{ env.REGION }} \
+              --project=${{ env.PROJECT_ID }}
             
+            sleep 30
             echo "Index creation complete. Looking up resource ID..."
             INDEX_ID=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="display_name=${{ env.INDEX_NAME }}" --limit=1)
             echo "Created Index: $INDEX_ID"
@@ -115,15 +117,17 @@ jobs:
 
           # 2. Ensure Endpoint Exists
           ENDPOINT_ID=$(gcloud ai index-endpoints list --region=${{ env.REGION }} --format="value(name)" --filter="display_name=${{ env.ENDPOINT_NAME }}" --limit=1)
-          
+
           if [ -z "$ENDPOINT_ID" ]; then
             echo "Creating Vector Search Endpoint..."
             gcloud ai index-endpoints create \
               --display-name=${{ env.ENDPOINT_NAME }} \
-              --region=${{ env.REGION }}
+              --region=${{ env.REGION }} \
+              --project=${{ env.PROJECT_ID }}
             
             ENDPOINT_ID=$(gcloud ai index-endpoints list --region=${{ env.REGION }} --format="value(name)" --filter="display_name=${{ env.ENDPOINT_NAME }}" --limit=1)
             echo "Created Endpoint: $ENDPOINT_ID"
+            sleep 60
           else
             echo "Endpoint already exists: $ENDPOINT_ID"
           fi
@@ -179,11 +183,11 @@ jobs:
             echo "Creating GOOGLE_API_KEY secret container..."
             gcloud secrets create GOOGLE_API_KEY --replication-policy="automatic"
           fi
-          
+
           # Sanitize: strip all whitespace, newlines, carriage returns
           CLEAN_KEY=$(echo -n "${{ secrets.GOOGLE_API_KEY }}" | tr -d '[:space:]')
           echo "API Key length after sanitization: ${#CLEAN_KEY} characters"
-          
+
           # Add the sanitized value as a new secret version
           echo -n "$CLEAN_KEY" | gcloud secrets versions add GOOGLE_API_KEY --data-file=-
           echo "Successfully updated GOOGLE_API_KEY with the sanitized GitHub Secret value."
