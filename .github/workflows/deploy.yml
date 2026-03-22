@@ -11,7 +11,6 @@ env:
   REGION: us-central1
   SERVICE_NAME: meridian-ai-cloud-run
   IMAGE_NAME: gcr.io/${{ secrets.GCP_PROJECT_ID }}/meridian-ai-cloud-run
-  DOC_BUCKET: gs://${{ secrets.GCP_PROJECT_ID }}-documents
   VECTOR_BUCKET: gs://${{ secrets.GCP_PROJECT_ID }}-vector-staging
   INDEX_NAME: financial-docs-production
   ENDPOINT_NAME: financial-docs-endpoint
@@ -56,14 +55,6 @@ jobs:
       # --- Phase 2: Storage Buckets ---
       - name: Ensure Storage Buckets Exist
         run: |
-          # Check and create Document Bucket
-          if ! gcloud storage buckets describe ${{ env.DOC_BUCKET }} >/dev/null 2>&1; then
-            echo "Creating document storage bucket..."
-            gcloud storage buckets create ${{ env.DOC_BUCKET }} --location=${{ env.REGION }} --uniform-bucket-level-access --public-access-prevention
-          else
-            echo "Document bucket already exists."
-          fi
-
           # Check and create Vector Staging Bucket
           if ! gcloud storage buckets describe ${{ env.VECTOR_BUCKET }} >/dev/null 2>&1; then
             echo "Creating vector staging bucket..."
