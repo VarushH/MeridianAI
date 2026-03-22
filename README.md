@@ -21,7 +21,7 @@
 | **Client** | React Frontend | Vite, TypeScript, Tailwind CSS, Shadcn UI |
 | **Compute** | FastAPI Backend on GCP Cloud Run | Uvicorn, CORS, Static File Serving |
 | **AI Agents** | Procurement Audit Agent, RAG Pipeline | LangGraph, LangChain, Gemini 2.5 Pro |
-| **Data & AI** | Gemini LLMs, Vertex AI Vector Search, Cloud Storage | Embeddings, ANN Endpoint, GCS Buckets |
+| **Data & AI** | Gemini LLMs, Vertex AI Vector Search, Cloud Storage | Embeddings, GCS Buckets |
 | **Security** | Secret Manager | Runtime API Key Injection |
 | **CI/CD** | GitHub Actions → Cloud Build → Artifact Registry → Cloud Run | Automated Provisioning & Deployment |
 
@@ -31,22 +31,23 @@
 
 - [Prerequisites](#prerequisites)
 - [Project Structure](#project-structure)
-- [Local Development](#local-development)
-  - [Backend Setup](#1-backend-setup)
-  - [Frontend Setup](#2-frontend-setup)
-- [Running with Docker](#running-with-docker)
-- [Environment Variables](#environment-variables)
 - [Deploying to GCP (From Scratch)](#deploying-to-a-brand-new-gcp-project-from-scratch)
   - [Step 1: Create Project & Enable Billing](#step-1-create-the-project-and-enable-billing)
   - [Step 2: Create a Service Account](#step-2-create-a-powerful-service-account)
   - [Step 3: Configure GitHub Secrets](#step-3-configure-github-secrets)
   - [Step 4: Trigger the Pipeline](#step-4-trigger-the-pipeline)
+  - [Step 5: Sync Local Environment](#step-5-sync-local-environment)
+- [Local Development](#local-development)
+  - [1. Backend Setup](#1-backend-setup)
+  - [2. Frontend Setup](#2-frontend-setup)
+- [Running with Docker](#running-with-docker)
+- [Environment Variables](#environment-variables)
 
 ---
 
 ## Prerequisites
 
-- **Python** 3.11+
+- **Python** 3.12.7
 - **Node.js** 20+
 - **Google Cloud SDK** (`gcloud` CLI) — [Install Guide](https://cloud.google.com/sdk/docs/install)
 - **Docker** (optional, for containerised local runs)
@@ -80,101 +81,6 @@ MeridianAI/
 ├── requirements.txt    # Python dependencies
 └── .env                # Local environment variables (git-ignored)
 ```
-
----
-
-## Local Development
-
-### 1. Backend Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/<your-org>/MeridianAI.git
-cd MeridianAI
-
-# Create and activate a virtual environment
-python -m venv .meridian
-# Windows
-.meridian\Scripts\activate
-# macOS / Linux
-source .meridian/bin/activate
-
-# Install Python dependencies
-pip install -r requirements.txt
-
-# Set GCP credentials for local development
-# Windows (cmd)
-set GOOGLE_APPLICATION_CREDENTIALS=./credentials/service-account.json
-# Windows (PowerShell)
-$env:GOOGLE_APPLICATION_CREDENTIALS="./credentials/service-account.json"
-# macOS / Linux
-export GOOGLE_APPLICATION_CREDENTIALS=./credentials/service-account.json
-
-# (Optional) Set your quota project
-gcloud auth application-default set-quota-project <your-gcp-project-id>
-
-# Start the backend dev server
-uvicorn api.main:app --app-dir backend --reload --port 8080
-```
-
-The API will be available at **http://localhost:8080**. Interactive docs at **http://localhost:8080/docs**.
-
-### 2. Frontend Setup
-
-```bash
-# In a new terminal, navigate to the frontend directory
-cd frontend
-
-# Install dependencies
-npm install
-
-# Start the Vite dev server
-npm run dev
-```
-
-The frontend will be available at **http://localhost:5173** (default Vite port) and will proxy API calls to the backend.
-
----
-
-## Running with Docker
-
-Build and run the unified container that serves both the frontend and backend:
-
-```bash
-# Build the image
-docker build -t meridian-ai .
-
-# Run the container
-docker run -p 8080:8080 --env-file .env meridian-ai
-```
-
-Or use Docker Compose:
-
-```bash
-docker compose up --build
-```
-
-The application will be accessible at **http://localhost:8080**.
-
----
-
-## Environment Variables
-
-Create a `.env` file in the project root. See the table below for required and optional variables:
-
-| Variable | Required | Description |
-|---|:---:|---|
-| `ENVIRONMENT` | ✅ | `local` or `production` |
-| `GCP_PROJECT_ID` | ✅ | Your Google Cloud project ID |
-| `GCP_REGION` | ✅ | GCP region (e.g., `us-central1`) |
-| `GOOGLE_API_KEY` | ✅ | Gemini API key |
-| `GCS_BUCKET_NAME` | ✅ | GCS bucket for vector staging & uploads |
-| `GCS_PREFIX` | | Upload path prefix (default: `uploads/`) |
-| `GCP_SERVICE_ACCOUNT_PATH` | | Path to local service account JSON |
-| `VERTEX_LLM_MODEL_NAME` | | LLM model (default: `gemini-2.5-pro`) |
-| `VERTEX_EMBEDDING_MODEL_NAME` | | Embedding model (default: `gemini-embedding-2-preview`) |
-| `VECTOR_SEARCH_INDEX_ID` | ✅ | Vertex AI Vector Search index resource ID |
-| `VECTOR_SEARCH_INDEX_ENDPOINT_ID` | ✅ | Vertex AI Vector Search endpoint resource ID |
 
 ---
 
@@ -243,7 +149,9 @@ Add the following three secrets:
 Push your code to the `main` branch (or manually trigger the workflow via the **Actions** tab).
 
 ```bash
-git push origin main
+git add .
+git commit -m <Commit Message>
+git push
 ```
 
 The GitHub Action (`.github/workflows/deploy.yml`) will now automatically:
@@ -259,6 +167,105 @@ The GitHub Action (`.github/workflows/deploy.yml`) will now automatically:
 > The very first deployment can take **30–45 minutes** due to Vector Search index creation. Subsequent deployments typically complete in **3–5 minutes**.
 
 Once complete, the Action logs will print your live Cloud Run URL. **Your application is now fully automated and live!** 🚀
+
+### Step 5: Sync Local Environment
+
+To run the project locally, you must sync it against your newly provisioned GCP infrastructure:
+
+1. **Service Account Credentials:** Move the `github-deployer-key.json` file downloaded in Step 2 into the `credentials/` folder and rename it to `service-account.json`. Your local `.env` and `README` startup commands will now automatically use this file.
+2. **Vector Search IDs:** In your GitHub Actions run, expand the **Provision Vector Search Index & Endpoint** step in the logs. Look at the very bottom of that step's output to find your newly generated `INDEX_ID` and `ENDPOINT_ID`.
+3. **Update `.env`:** Copy those IDs into your local `.env` file as `VECTOR_SEARCH_INDEX_ID` and `VECTOR_SEARCH_INDEX_ENDPOINT_ID`. Also ensure `GCP_PROJECT_ID` and `GCS_BUCKET_NAME` match your new project.
+
+---
+
+## Local Development
+
+Now that GCP is provisioned and your local credentials/ `.env` are set up, you can run the project locally.
+
+### 1. Backend Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/<your-org>/MeridianAI.git
+cd MeridianAI
+
+# Create and activate a virtual environment
+python -m venv .meridian
+# Windows
+.meridian\Scripts\activate
+# macOS / Linux
+source .meridian/bin/activate
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Set GCP credentials for local development
+# Windows (cmd)
+set GOOGLE_APPLICATION_CREDENTIALS=./credentials/service-account.json
+# Windows (PowerShell)
+$env:GOOGLE_APPLICATION_CREDENTIALS="./credentials/service-account.json"
+# macOS / Linux
+export GOOGLE_APPLICATION_CREDENTIALS=./credentials/service-account.json
+
+# (Optional) Set your quota project
+gcloud auth application-default set-quota-project <your-gcp-project-id>
+
+# Start the backend dev server
+uvicorn api.main:app --app-dir backend --reload --port 8080
+```
+
+The API will be available at **http://localhost:8080**. Interactive docs at **http://localhost:8080/docs**.
+
+### 2. Frontend Setup
+
+```bash
+# In a new terminal, navigate to the frontend directory
+cd frontend
+
+# Install dependencies
+npm install
+
+# Start the Vite dev server
+npm run dev
+```
+
+The frontend will be available at **http://localhost:5173** (default Vite port) and will proxy API calls to the backend.
+
+---
+
+## Running with Docker
+
+Build and run the unified container that serves both the frontend and backend locally:
+
+```bash
+# Build the image
+docker build -t meridian-ai .
+
+# Run the container
+docker run -p 8080:8080 meridian-ai
+```
+
+The application will be accessible at **http://localhost:8080**.
+
+---
+
+## Environment Variables
+
+Create a `.env` file in the project root. See the table below for required and optional variables:
+
+| Variable | Required | Description |
+|---|:---:|---|
+| `ENVIRONMENT` | ✅ | `local` or `production` |
+| `GCP_PROJECT_ID` | ✅ | Your Google Cloud project ID |
+| `GCP_REGION` | ✅ | GCP region (e.g., `us-central1`) |
+| `GOOGLE_API_KEY` | ✅ | Gemini API key |
+| `GCS_BUCKET_NAME` | ✅ | GCS bucket for vector staging & uploads |
+| `GCS_PREFIX` | | Upload path prefix (default: `uploads/`) |
+| `GCP_SERVICE_ACCOUNT_PATH` | | Path to local service account JSON |
+| `LLM_MODEL_NAME` | | LLM model (default: `gemini-2.5-pro`) |
+| `EMBEDDING_MODEL_NAME` | | Embedding model (default: `gemini-embedding-2-preview`) |
+| `VECTOR_SEARCH_INDEX_ID` | ✅ | Vertex AI Vector Search index resource ID |
+| `VECTOR_SEARCH_INDEX_ENDPOINT_ID` | ✅ | Vertex AI Vector Search endpoint resource ID |
 
 ---
 
