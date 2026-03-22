@@ -51,6 +51,9 @@ jobs:
             cloudresourcemanager.googleapis.com \
             iam.googleapis.com \
             generativelanguage.googleapis.com
+            
+          echo "Waiting 90 seconds for API enablement to fully propagate across GCP..."
+          sleep 90
 
       # --- Phase 2: Storage Buckets ---
       - name: Ensure Storage Buckets Exist
