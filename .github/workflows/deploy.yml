@@ -96,7 +96,7 @@ jobs:
           EOF
 
           # 1. Ensure Index Exists
-          INDEX_ID=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.INDEX_NAME }}" --limit=1)
+          INDEX_ID=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="display_name=${{ env.INDEX_NAME }}" --limit=1)
           
           if [ -z "$INDEX_ID" ]; then
             echo "Creating Vector Search Index. This command waits synchronously (~25-30 min)..."
@@ -107,14 +107,14 @@ jobs:
               --region=${{ env.REGION }}
             
             echo "Index creation complete. Looking up resource ID..."
-            INDEX_ID=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.INDEX_NAME }}" --limit=1)
+            INDEX_ID=$(gcloud ai indexes list --region=${{ env.REGION }} --format="value(name)" --filter="display_name=${{ env.INDEX_NAME }}" --limit=1)
             echo "Created Index: $INDEX_ID"
           else
             echo "Index already exists: $INDEX_ID"
           fi
 
           # 2. Ensure Endpoint Exists
-          ENDPOINT_ID=$(gcloud ai index-endpoints list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.ENDPOINT_NAME }}" --limit=1)
+          ENDPOINT_ID=$(gcloud ai index-endpoints list --region=${{ env.REGION }} --format="value(name)" --filter="display_name=${{ env.ENDPOINT_NAME }}" --limit=1)
           
           if [ -z "$ENDPOINT_ID" ]; then
             echo "Creating Vector Search Endpoint..."
@@ -122,7 +122,7 @@ jobs:
               --display-name=${{ env.ENDPOINT_NAME }} \
               --region=${{ env.REGION }}
             
-            ENDPOINT_ID=$(gcloud ai index-endpoints list --region=${{ env.REGION }} --format="value(name)" --filter="displayName=${{ env.ENDPOINT_NAME }}" --limit=1)
+            ENDPOINT_ID=$(gcloud ai index-endpoints list --region=${{ env.REGION }} --format="value(name)" --filter="display_name=${{ env.ENDPOINT_NAME }}" --limit=1)
             echo "Created Endpoint: $ENDPOINT_ID"
           else
             echo "Endpoint already exists: $ENDPOINT_ID"
