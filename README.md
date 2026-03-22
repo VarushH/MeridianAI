@@ -13,7 +13,7 @@
 ## Architecture
 
 <p align="center">
-  <img src="docs/architecture.png" alt="MeridianAI Architecture" width="100%"/>
+  <img src="Supporting Documents/architecture_diagram.png" alt="MeridianAI Architecture" width="100%"/>
 </p>
 
 | Layer | Components | Technologies |
