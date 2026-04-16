@@ -233,10 +233,27 @@ async def upload_documents(files: list[UploadFile] = File(...)):
                 })
                 continue
 
-            # Embed & store
-            log.info("Ingesting chunks into Vector Search", filename=upload.filename, chunks=len(chunks))
-            vector_store.add_documents(chunks)
-            log.info("Successfully ingested chunks", filename=upload.filename, chunks=len(chunks))
+            # Embed & store — manually batch to work around a token-based
+            # batching bug in GoogleGenerativeAIEmbeddings._prepare_batches
+            # that can return fewer embeddings than input texts.
+            from rag.embeddings import get_embeddings
+            _emb = get_embeddings()
+            BATCH = 5
+            all_texts = [c.page_content for c in chunks]
+            all_metas = [c.metadata for c in chunks]
+            log.info("Ingesting chunks into Vector Search", filename=upload.filename, chunks=len(chunks), batch_size=BATCH)
+            for i in range(0, len(chunks), BATCH):
+                batch_texts = all_texts[i : i + BATCH]
+                batch_metas = all_metas[i : i + BATCH]
+                # Embed one small batch at a time
+                batch_embeddings = [_emb.embed_query(t) for t in batch_texts]
+                vector_store.add_texts_with_embeddings(
+                    texts=batch_texts,
+                    embeddings=batch_embeddings,
+                    metadatas=batch_metas,
+                )
+                log.info("Batch ingested", filename=upload.filename, batch=f"{i // BATCH + 1}/{(len(chunks) - 1) // BATCH + 1}", docs=len(batch_texts))
+            log.info("Successfully ingested all chunks", filename=upload.filename, chunks=len(chunks))
 
             results.append({
                 "filename": upload.filename,

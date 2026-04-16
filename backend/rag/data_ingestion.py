@@ -51,7 +51,22 @@ def ingest_data_from_gcs():
     log.info("Split documents into chunks", chunks=len(chunks))
 
     # Embed and store in Vertex AI Vector Search
-    log.info("Embedding chunks and pushing to Vertex AI Vector Search")
-    vector_store.add_documents(chunks)
+    # Manually batch to work around _prepare_batches token-counting bug
+    from rag.embeddings import get_embeddings
+    _emb = get_embeddings()
+    BATCH = 5
+    all_texts = [c.page_content for c in chunks]
+    all_metas = [c.metadata for c in chunks]
+    log.info("Embedding chunks and pushing to Vertex AI Vector Search", batch_size=BATCH)
+    for i in range(0, len(chunks), BATCH):
+        batch_texts = all_texts[i : i + BATCH]
+        batch_metas = all_metas[i : i + BATCH]
+        batch_embeddings = [_emb.embed_query(t) for t in batch_texts]
+        vector_store.add_texts_with_embeddings(
+            texts=batch_texts,
+            embeddings=batch_embeddings,
+            metadatas=batch_metas,
+        )
+        log.info("Batch ingested", batch=f"{i // BATCH + 1}/{(len(chunks) - 1) // BATCH + 1}", docs=len(batch_texts))
     log.info("Ingestion complete")
 
